@@ -7,6 +7,8 @@ use winit::event_loop::{ControlFlow, EventLoop};
 use image;
 
 const SOCKET_PATH: &str = "/tmp/rgb-daemon.sock";
+const ICON_ON_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/light_on.png");
+const ICON_OFF_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/light_off.png");
 
 // Define our menu items
 struct MenuItemDef {
@@ -24,7 +26,7 @@ const MENU_ITEMS: &[MenuItemDef] = &[
 
 fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
-    let icon = load_icon()?;
+    let icon = load_icon(ICON_OFF_PATH)?;
 
     // Create menu
     let menu = Menu::new();
@@ -40,7 +42,7 @@ fn main() -> Result<()> {
         menu.append(&menu_item)?;
     }
 
-    let _tray_icon = TrayIconBuilder::new()
+    let tray_icon = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("RGB Controller")
         .with_icon(icon)
@@ -49,15 +51,22 @@ fn main() -> Result<()> {
     // Handle menu events
     let menu_channel = MenuEvent::receiver();
     
+    // Create a channel for icon updates
+    let (icon_tx, icon_rx) = std::sync::mpsc::channel();
+    
     std::thread::spawn(move || {
-        while let Ok(event) = menu_channel.recv() {
-            println!("Menu item clicked: {}", event.id.0);
-            
+        while let Ok(event) = menu_channel.recv() {            
             // Find the matching menu item definition
             if let Some(item_def) = MENU_ITEMS.iter().find(|item| item.id == event.id.0) {
                 match item_def.profile {
                     Some(profile) => {
                         println!("Switching to {:?} profile", profile);
+                        // Send icon path update through channel instead of directly updating
+                        let icon_path = match profile {
+                            Profile::Off => ICON_OFF_PATH,
+                            _ => ICON_ON_PATH,
+                        };
+                        let _ = icon_tx.send(icon_path);
                         send_profile(profile);
                     }
                     None => {
@@ -72,14 +81,19 @@ fn main() -> Result<()> {
     });
 
     event_loop.run(move |_event, elwt| {
+        // Check for icon updates
+        if let Ok(icon_path) = icon_rx.try_recv() {
+            if let Ok(new_icon) = load_icon(icon_path) {
+                let _ = tray_icon.set_icon(Some(new_icon));
+            }
+        }
         elwt.set_control_flow(ControlFlow::Wait);
     })?;
 
     Ok(())
 }
 
-fn load_icon() -> Result<Icon> {
-    let icon_path = concat!(env!("CARGO_MANIFEST_DIR"), "/assets/icon.png");
+fn load_icon(icon_path: &str) -> Result<Icon> {
     let image = image::open(icon_path)
         .context("Failed to open icon file")?
         .into_rgba8();

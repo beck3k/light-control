@@ -8,6 +8,7 @@ use std::any::Any;
 use rand::seq::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use std::env;
 
 pub struct MoteController {
     name: String,
@@ -15,8 +16,23 @@ pub struct MoteController {
     current_state: [[Color; 16]; 4],  // [channel][pixel]
 }
 
+fn get_python_path() -> Option<String> {
+    env::var("VIRTUAL_ENV").ok().map(|venv_path| {
+        if cfg!(target_os = "macos") {
+            format!("{}/lib/python3.11/site-packages", venv_path)
+        } else {
+            format!("{}/lib/python3/site-packages", venv_path)
+        }
+    })
+}
+
 impl MoteController {
     pub fn new(name: String) -> Result<Self> {
+        if let Some(site_packages) = get_python_path() {
+            env::set_var("PYTHONPATH", site_packages);
+        }
+        println!("PYTHONPATH: {}", env::var("PYTHONPATH").unwrap_or_default());
+
         Python::with_gil(|py| {
             // Import the mote module
             let mote_module = PyModule::import(py, "mote")
