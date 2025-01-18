@@ -8,4 +8,4 @@ The program is constructed in two parts:
 2. The tray, which provides a menu for switching profiles, through an icon in the system tray.
 
 To bundle the app for MacOS, run the build.sh script. It will build the rust binaries, and create a virtualenv which is bundled with the app. The app starts both the daemon and the tray application.
-
+You will find the app in the target/release directory.
