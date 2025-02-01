@@ -2,7 +2,7 @@ use anyhow::{Result, Context};
 use rgb_daemon::{Command, Profile, ColorSetting};
 use std::path::PathBuf;
 use tray_icon::{Icon, TrayIconBuilder};
-use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId, accelerator::Accelerator};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, MenuId, accelerator::Accelerator, PredefinedMenuItem};
 use winit::event_loop::{ControlFlow, EventLoop};
 use image;
 
@@ -21,6 +21,9 @@ const MENU_ITEMS: &[MenuItemDef] = &[
     MenuItemDef { id: "profile_off", label: "Off", profile: Some(Profile::Off) },
     MenuItemDef { id: "profile_red", label: "Red", profile: Some(Profile::Red) },
     MenuItemDef { id: "profile_white", label: "White", profile: Some(Profile::White) },
+    MenuItemDef { id: "separator1", label: "-", profile: None },
+    MenuItemDef { id: "reconnect", label: "Reconnect Device", profile: None },
+    MenuItemDef { id: "separator2", label: "-", profile: None },
     MenuItemDef { id: "quit", label: "Quit", profile: None },
 ];
 
@@ -33,6 +36,11 @@ fn main() -> Result<()> {
     
     // Add all menu items
     for item_def in MENU_ITEMS {
+        if item_def.label == "-" {
+            let _ = menu.append(&PredefinedMenuItem::separator());
+            continue;
+        }
+        
         let menu_item = MenuItem::with_id(
             item_def.id,
             MenuId(item_def.label.to_string()),
@@ -58,10 +66,9 @@ fn main() -> Result<()> {
         while let Ok(event) = menu_channel.recv() {            
             // Find the matching menu item definition
             if let Some(item_def) = MENU_ITEMS.iter().find(|item| item.id == event.id.0) {
-                match item_def.profile {
-                    Some(profile) => {
+                match (item_def.id, item_def.profile) {
+                    (_, Some(profile)) => {
                         println!("Switching to {:?} profile", profile);
-                        // Send icon path update through channel instead of directly updating
                         let icon_path = match profile {
                             Profile::Off => ICON_OFF_PATH,
                             _ => ICON_ON_PATH,
@@ -69,10 +76,15 @@ fn main() -> Result<()> {
                         let _ = icon_tx.send(icon_path);
                         send_profile(profile);
                     }
-                    None => {
+                    ("reconnect", None) => {
+                        println!("Reconnecting device...");
+                        send_reconnect();
+                    }
+                    ("quit", None) => {
                         println!("Exiting application");
                         std::process::exit(0);
                     }
+                    _ => {}
                 }
             } else {
                 println!("Unknown menu item: {}", event.id.0);
@@ -116,6 +128,21 @@ fn send_profile(profile: Profile) {
                 eprintln!("Failed to send profile command: {}", e);
             } else {
                 println!("Successfully sent profile command");
+            }
+        });
+}
+
+fn send_reconnect() {
+    println!("Creating runtime to send reconnect command");
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async {
+            let socket_path = PathBuf::from(SOCKET_PATH);
+            println!("Sending reconnect command to daemon at {}", socket_path.display());
+            if let Err(e) = send_command(socket_path, Command::Reconnect).await {
+                eprintln!("Failed to send reconnect command: {}", e);
+            } else {
+                println!("Successfully sent reconnect command");
             }
         });
 }
